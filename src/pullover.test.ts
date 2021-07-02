@@ -1,15 +1,77 @@
 import * as chai from "chai";
 import * as chaiAsPromised from "chai-as-promised";
-import { concat, delay, empty, of, runToArray, throwError, run, recover, fromIterable, mapAsync } from "./pullover";
+import {
+    append,
+    concat,
+    delay,
+    empty,
+    fromIterable, fromIterator, intersperse,
+    mapAsync,
+    of, prepend,
+    recover,
+    run,
+    runToArray,
+    throwError
+} from "./pullover";
 import { pipe } from "fp-ts/function";
 
 chai.use(chaiAsPromised);
 const expect = chai.expect;
 
+// Utils to create iterator / asyncIterator
+const makeNumberIterator = (count: number): Iterator<number> => {
+    let valuesToReturn = count;
+    return {
+        next: () => valuesToReturn > 0
+            ? { value: valuesToReturn-- } as IteratorYieldResult<number>
+            : { done: true } as IteratorReturnResult<number>
+    };
+}
+
+const makeNumberAsyncIterator = (count: number): AsyncIterator<number> => {
+    let valuesToReturn = count;
+    return {
+        next: () => valuesToReturn > 0
+            ? Promise.resolve({ value: valuesToReturn-- } as IteratorYieldResult<number>)
+            : Promise.resolve({ done: true } as IteratorReturnResult<number>)
+    };
+}
+
+
 describe('pullover', () => {
     describe('of', () => {
         it('should create stream with one item', async () => {
             expect(await runToArray(of(666))).to.eql([666]);
+        });
+    });
+
+    describe('fromIterator', () => {
+        it('should create stream from iterator', async () => {
+            const stream = fromIterator(makeNumberIterator(2));
+            expect(await runToArray(stream)).to.eql([2,1]);
+        });
+
+        it('should create stream from async iterator', async () => {
+            const stream = fromIterator(makeNumberAsyncIterator(2));
+            expect(await runToArray(stream)).to.eql([2,1]);
+        });
+    });
+
+    describe('fromIterable', () => {
+        it('should create stream from iterable', async () => {
+            const iterable: Iterable<number> = {
+                [Symbol.iterator]: () => makeNumberIterator(2),
+            };
+            const stream = fromIterable(iterable);
+            expect(await runToArray(stream)).to.eql([2,1]);
+        });
+
+        it('should create stream from async iterable', async () => {
+            const iterable: AsyncIterable<number> = {
+                [Symbol.asyncIterator]: () => makeNumberAsyncIterator(2),
+            };
+            const stream = fromIterable(iterable);
+            expect(await runToArray(stream)).to.eql([2,1]);
         });
     });
 
@@ -107,6 +169,56 @@ describe('pullover', () => {
             );
 
             expect(await runToArray(stream)).to.eql([0,10,20,30,40,50,60,70,80,90]);
+        });
+    });
+
+    describe('empty', () => {
+        it('should emit no item', async () => {
+            expect(await runToArray(empty)).to.eql([]);
+        });
+    });
+
+    describe('append', () => {
+        it ('should append item to stream', async () => {
+            const stream = pipe(
+                of(1),
+                append(() => 2),
+            );
+            expect(await runToArray(stream)).to.eql([1, 2]);
+        });
+    });
+
+    describe('prepend', async () => {
+        it ('should append item to stream', async () => {
+            const stream = pipe(
+                of(2),
+                prepend(() => 1),
+            );
+            expect(await runToArray(stream)).to.eql([1, 2]);
+        });
+    });
+
+    describe('intersperse', async () => {
+        it ('should intersperse item between items of original stream', async () => {
+
+            const stream1 = pipe(
+                fromIterable(['A', 'B']),
+                intersperse(() => '-'),
+            );
+
+            const stream2 = pipe(
+                fromIterable(['A']),
+                intersperse(() => '-'),
+            );
+
+            const stream3 = pipe(
+                empty,
+                intersperse(() => '-'),
+            );
+
+            expect(await runToArray(stream1)).to.eql(['A', '-', 'B']);
+            expect(await runToArray(stream2)).to.eql(['A']);
+            expect(await runToArray(stream3)).to.eql([]);
         });
     });
 });

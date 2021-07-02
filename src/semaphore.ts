@@ -1,27 +1,28 @@
-import EventEmitter = require("events");
-// import { constVoid } from "fp-ts/function";
+import { constVoid } from "fp-ts/function";
 
-type AcquireFunction = () => Promise<ReleaseFunction>;
 type ReleaseFunction = () => void;
 
 export interface Semaphore {
-    acquire: AcquireFunction,
+    acquire: () => Promise<ReleaseFunction>,
     available: () => number,
 }
 
 export const makeSemaphore = (max: number): Semaphore => {
     const locks = new Set<Symbol>();
-    const eventEmitter = new EventEmitter();
+    const waitingToAcquire: Array<() => void> = [];
 
     const makeRelease = (): ReleaseFunction => {
         const lock = Symbol();
         locks.add(lock);
-        const keepAliveInterval = setInterval(() => console.log('tick'), 1000);
+        const keepAliveInterval = setInterval(constVoid, 1000);
         const release = () => {
             if (locks.has(lock)) {
                 locks.delete(lock);
                 clearInterval(keepAliveInterval);
-                eventEmitter.emit('released');
+                const resolve = waitingToAcquire.pop();
+                if (resolve) {
+                    resolve();
+                }
             }
         }
 
@@ -31,9 +32,9 @@ export const makeSemaphore = (max: number): Semaphore => {
     const acquire = (): Promise<ReleaseFunction> =>
         locks.size < max
             ? Promise.resolve(makeRelease())
-            : new Promise(
-                resolve => eventEmitter.once('released', () => resolve(makeRelease()))
-            );
+            : new Promise(resolve => {
+                waitingToAcquire.unshift(() => resolve(makeRelease()))
+            });
 
     return {
         acquire,

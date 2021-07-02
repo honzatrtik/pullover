@@ -31,7 +31,7 @@ describe('semaphore', () => {
 
 
     it('should wait for lock to be released to acquire again', async () => {
-        const actions = [];
+        const actions: string[] = [];
         const semaphore = makeSemaphore(1);
 
         const release1 = await semaphore.acquire();
@@ -42,11 +42,35 @@ describe('semaphore', () => {
             release1();
         }, 10);
 
-        const release2 = await semaphore.acquire();
-        actions.push('acquire2');
-        release2();
+        const release2Promise = semaphore.acquire();
+        const release3Promise = semaphore.acquire();
 
-        expect(actions).to.eql(['acquire1', 'release1', 'acquire2']);
+        release2Promise.then(release2 => {
+            actions.push("acquire2");
+            release2();
+            actions.push("release2");
+
+        });
+        release3Promise.then(release3 => {
+            actions.push("acquire3");
+            release3();
+            actions.push("release3");
+        });
+
+
+        return Promise.all([
+            release2Promise,
+            release3Promise,
+        ]).then(() => {
+            expect(actions).to.eql([
+                'acquire1',
+                'release1',
+                'acquire2',
+                'release2',
+                'acquire3',
+                'release3',
+            ]);
+        });
     });
 
 

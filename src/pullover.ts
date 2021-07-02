@@ -17,15 +17,49 @@ export const fromIterable = <A>(iterable: Iterable<A> | AsyncIterable<A>): Strea
     }
 }
 
+export const fromIterator = <A>(iterator: Iterator<A> | AsyncIterator<A>): Stream<A> => async function* () {
+    let a = await iterator.next();
+    while (!a.done) {
+        yield a.value;
+        a = await iterator.next();
+    }
+}
+
 export const throwError = (e: unknown): Stream<never> => async function* () {
     yield Promise.reject(e);
 }
 
-export const empty: Stream<never> = async function* () {}
+export const empty: Stream<never> = async function* () {
+}
 
 export const concat = <A>(ga: Stream<A>) => (fa: Stream<A>): Stream<A> => async function* () {
     yield* fa();
     yield* ga();
+}
+
+export const append = <A>(after: Lazy<A>) => (fa: Stream<A>): Stream<A> => async function* () {
+    yield* fa();
+    yield after();
+}
+
+export const prepend = <A>(before: Lazy<A>) => (fa: Stream<A>): Stream<A> => async function* () {
+    yield before();
+    yield* fa();
+}
+
+export const intersperse = <A>(item: Lazy<A>) => (fa: Stream<A>): Stream<A> => async function* () {
+    const gen = fa();
+    const i = item();
+    let a = await gen.next();
+    let b = await gen.next();
+    while (!a.done) {
+        yield a.value;
+        a = b;
+        if (!b.done) {
+            yield i;
+            b = await gen.next();
+        }
+    }
 }
 
 export const recover = <A>(f: (e: unknown) => Stream<A>) => (fa: Stream<A>): Stream<A> => async function* () {
@@ -57,7 +91,6 @@ export const drop = (n: number) => <A>(fa: Stream<A>): Stream<A> => async functi
 }
 
 
-
 export const mapAsync = <A, B>(f: (a: A) => Promise<B>, concurrency: number = 1) => (fa: Stream<A>): Stream<B> => {
     const gen = fa();
     const semaphore = makeSemaphore(concurrency);
@@ -65,23 +98,28 @@ export const mapAsync = <A, B>(f: (a: A) => Promise<B>, concurrency: number = 1)
     return fromIterable({
         [Symbol.asyncIterator]: () => ({
             next: async () => {
+
                 while (semaphore.available()) {
                     const release = await semaphore.acquire();
+                    try {
+                        const result = await gen.next();
+                        if (result.done) {
+                            release();
+                            break;
+                        }
 
-                    const result = await gen.next();
-                    if (result.done) {
+                        const promise = f(result.value);
+                        promises.unshift(promise);
+                        promise.then(() => release());
+                    } catch (e) {
                         release();
-                        break;
+                        throw e;
                     }
-
-                    const promise = f(result.value);
-                    promises.unshift(promise);
-                    promise.then(() => release());
                 }
 
                 const last = promises.pop();
                 return last === undefined
-                    ? { done: true , value: undefined } as IteratorReturnResult<void>
+                    ? { done: true, value: undefined } as IteratorReturnResult<void>
                     : { done: false, value: await last } as IteratorYieldResult<B>
             }
         })
@@ -123,6 +161,8 @@ export const tap = <A>(f: (a: A) => void) => (fa: Stream<A>): Stream<A> => async
     }
 }
 
+export const through = <A, B>(f: (fa: Stream<A>) => Stream<B>) => f
+
 export const zip = <A, B>(fb: Stream<B>) => (fa: Stream<A>): Stream<readonly [A, B]> => async function* () {
     const genA = fa();
     const genB = fb();
@@ -136,10 +176,10 @@ export const zip = <A, B>(fb: Stream<B>) => (fa: Stream<A>): Stream<readonly [A,
 }
 
 
-
 export const run = async <A>(fa: Stream<A>): Promise<void> => {
     const gen = fa();
-    while (!(await gen.next()).done) {}
+    while (!(await gen.next()).done) {
+    }
 }
 
 export const runToArray = async <A>(fa: Stream<A>): Promise<Array<A>> => {
